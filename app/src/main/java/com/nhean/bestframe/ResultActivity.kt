@@ -1,6 +1,7 @@
 package com.nhean.bestframe
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
@@ -16,14 +17,14 @@ import android.util.Base64
 import java.io.FileInputStream
 import java.io.FileNotFoundException
 import java.io.IOException
+import java.lang.Double.parseDouble
+import java.lang.Long.parseLong
 
 
 class ResultActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_result)
-
-        supportActionBar!!.title = "Output Result: "
 
         val bundle :Bundle ?=intent.extras
         if (bundle!=null){
@@ -36,9 +37,18 @@ class ResultActivity : AppCompatActivity() {
             val bmp = loadBitmap(baseContext, image.toString())
             image_view.setImageBitmap(bmp)
 
-            val resultOpt = "ID: ${idNumber} \nBirth Date: ${birthDate}\nGender: ${gender}\nName: ${name}"
+            val assesment_time = bundle.getString("assesment_time")
+            val ocr_time = bundle.getString("ocr_time")
+            val processing_time = bundle.getString("processing_time")
+
+            val resultOpt = "ID: ${idNumber} \nBirth Date: ${birthDate}\nGender: ${gender}\nName: ${name}\n\n\nAssesment Time: ${assesment_time} ms\nOCR Time: ${ocr_time} ms\nProcessing TIme: ${parseDouble(processing_time!!)/1000} s"
             result_txt.text = resultOpt
         }
+    }
+
+    override fun onBackPressed() {
+        super.onBackPressed()
+        startActivity(Intent(this, MainActivity::class.java))
     }
 
     fun loadBitmap(context: Context, picName:String): Bitmap? {
