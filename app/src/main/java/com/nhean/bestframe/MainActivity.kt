@@ -2,21 +2,20 @@ package com.nhean.bestframe
 
 import android.Manifest
 import android.content.Context
-import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.net.Uri
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
+import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import android.view.Menu
+import android.view.MenuItem
 import android.view.SurfaceView
 import android.view.WindowManager
 import androidx.core.app.ActivityCompat
-import android.os.SystemClock
-import android.util.Base64
-import android.widget.Chronometer
 import android.widget.Toast
 import com.google.android.gms.vision.Frame
 import com.google.android.gms.vision.text.TextRecognizer
@@ -29,13 +28,18 @@ import java.util.regex.Pattern
 
 
 class MainActivity : AppCompatActivity(), CameraBridgeViewBase.CvCameraViewListener2{
+    var flag = true
 
-    private var id_number = ""
-    private var dob = ""
-    private var gender = ""
-    private var name = ""
+    var id_number = ""
+    var dob = ""
+    var gender = ""
+    var name_person = ""
+    var imageOCRMain : ImageOCR? = null
+    var folder_name : String = "Session_${System.currentTimeMillis()}"
 
-    private lateinit var chronometer : Chronometer
+    var start : Long = 0
+
+    var ocr_thread : Thread? = null
 
     private var mOpenCvCameraView: CameraBridgeViewBase? = null
     private val mLoaderCallback = object : BaseLoaderCallback(this) {
@@ -53,10 +57,7 @@ class MainActivity : AppCompatActivity(), CameraBridgeViewBase.CvCameraViewListe
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
         ActivityCompat.requestPermissions(
             this@MainActivity,
             arrayOf(Manifest.permission.CAMERA, Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE),
@@ -66,20 +67,44 @@ class MainActivity : AppCompatActivity(), CameraBridgeViewBase.CvCameraViewListe
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(R.layout.activity_main)
 
+        start = System.currentTimeMillis()
+        this.flag = true
+
 //      Init OpenCV Camera
         mOpenCvCameraView = findViewById<CameraBridgeViewBase>(R.id.main_surface)
+        mOpenCvCameraView!!.setMaxFrameSize(1200, 600)  // Scale the frame down
         mOpenCvCameraView!!.visibility = SurfaceView.VISIBLE
         mOpenCvCameraView!!.setCvCameraViewListener(this)
 
-//      Init Stop Timer
-        chronometer = findViewById<Chronometer>(R.id.stop_watch_chronometer)
-        chronometer.setOnChronometerTickListener(object: Chronometer.OnChronometerTickListener {
-            override fun onChronometerTick(chronometerChanged:Chronometer) {
-                chronometer = chronometerChanged
+//      Start OCR Thread
+        ocr_thread = Thread(object:Runnable {
+            override fun run() {
+                while(flag){
+                    if(imageOCRMain != null){
+                        val imageOCR = imageOCRMain
+                        var time:Long = 0
+                        val resultStr = measureTimeMillis({duration -> time = duration}){
+                            detectTextFromBitmap(imageOCR!!.image) // Mobile Vision OCR
+                        }
+                        Log.i("$TAG-ResultSTR", resultStr+",\n\nDurations: $time ms")
+
+//                        saveLogFile(imageOCR, time, resultStr)
+
+                        if(!resultStr.isEmpty() && resultStr.length > MINIMUM_TEXT_LENGTH && validatedResult(resultStr)){
+                            flag = false // Set flag to false after find the valid result string
+
+                            val image_name = "${UUID.randomUUID()}.jpg"
+                            saveFile(baseContext, imageOCR!!.image!!, image_name)
+
+                            Log.i("ValidatedSTR", resultStr+",\n\nOCR Time: $time ms\nAssesment Time: ${imageOCR!!.assesment_time} ms")
+
+                            startActivityFromMainThread(id_number, dob, gender, name_person, image_name, imageOCR!!.assesment_time, time)
+                        }
+                    }
+                }
             }
         })
-        chronometer.setBase(SystemClock.elapsedRealtime());
-        chronometer.start();
+        ocr_thread!!.start()
     }
 
     override fun onRequestPermissionsResult(
@@ -92,7 +117,7 @@ class MainActivity : AppCompatActivity(), CameraBridgeViewBase.CvCameraViewListe
                 if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                     mOpenCvCameraView!!.setCameraPermissionGranted()
                 } else {
-                    val message = "Camera permission was not granted"
+                    val message = "Permission was not granted"
                     Log.e(TAG, message)
                     Toast.makeText(this, message, Toast.LENGTH_LONG).show()
                 }
@@ -103,17 +128,33 @@ class MainActivity : AppCompatActivity(), CameraBridgeViewBase.CvCameraViewListe
         }
     }
 
+    override fun onCreateOptionsMenu(menu: Menu?): Boolean {
+        menuInflater.inflate(R.menu.menu, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        var id = item.itemId
+        if(id == R.id.menu_video){
+            startActivity(Intent(this, VideoActivity::class.java))
+        }
+        return super.onOptionsItemSelected(item)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        flag = true
+    }
+
     override fun onPause() {
         super.onPause()
-        chronometer.stop()
+        imageOCRMain = null
         if (mOpenCvCameraView != null)
             mOpenCvCameraView!!.disableView()
     }
 
     override fun onResume() {
         super.onResume()
-        chronometer.setBase(SystemClock.elapsedRealtime());
-        chronometer.start();
         if (!OpenCVLoader.initDebug()) {
             OpenCVLoader.initAsync(OpenCVLoader.OPENCV_VERSION, this, mLoaderCallback)
         } else {
@@ -123,9 +164,14 @@ class MainActivity : AppCompatActivity(), CameraBridgeViewBase.CvCameraViewListe
 
     override fun onDestroy() {
         super.onDestroy()
-        chronometer.stop()
+        imageOCRMain = null
         if (mOpenCvCameraView != null)
             mOpenCvCameraView!!.disableView()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        imageOCRMain = null
     }
 
     override fun onCameraViewStarted(width: Int, height: Int) {}
@@ -133,45 +179,46 @@ class MainActivity : AppCompatActivity(), CameraBridgeViewBase.CvCameraViewListe
     override fun onCameraViewStopped() {}
 
     override fun onCameraFrame(frame: CameraBridgeViewBase.CvCameraViewFrame): Mat {
-        val mat = frame.rgba()
-        val base64Img = returnGrayImg(mat.nativeObjAddr)
-
-        if(base64Img.split(",")[1].toDouble() > BEST_IMAGE){
-            val resultStr = detectTextFromBitmap(base64ToBitmap(base64Img.split(",")[0]))
-            if(!resultStr.isEmpty() && resultStr.length > MINIMUM_TEXT_LENGTH && validatedResult(resultStr)){
-                val intent = Intent(this, ResultActivity::class.java)
-
-                val image = "${UUID.randomUUID()}.jpg"
-                saveFile(baseContext, base64ToBitmap(base64Img.split(",")[0]), image, "$resultStr\nTresshold: ${base64Img.split(",")[1]}")
-
-                chronometer.stop()
-                Log.i("ResultText", resultStr)
-
-                intent.putExtra("idNumber", this.id_number)
-                intent.putExtra("dob", this.dob)
-                intent.putExtra("gender", this.gender)
-                intent.putExtra("name", this.name)
-                intent.putExtra("image_name", image)
-                startActivity(intent)
-            }
+        var time : Long = 0
+        var lapla_var = measureTimeMillis({duration -> time = duration}) {
+            returnVarLapla(frame.gray().nativeObjAddr).toDouble() // C++ Native Method: Find Variance of Laplacian Value
         }
-        return mat
+
+        if(lapla_var > BEST_IMAGE){
+            imageOCRMain = ImageOCR(matToBitmap(frame.rgba()), lapla_var, time)
+
+        }
+        return frame.rgba()
     }
 
-    fun base64ToBitmap(base64_encoded: String) : Bitmap{
-        val decodedString = Base64.decode(base64_encoded, Base64.DEFAULT);
-        return BitmapFactory.decodeByteArray(decodedString, 0, decodedString.size);
+    private fun matToBitmap(imageMat : Mat) : Bitmap? {
+        var bmp:Bitmap? = null
+        try{
+            bmp = Bitmap.createBitmap(imageMat.cols(), imageMat.rows(), Bitmap.Config.ARGB_8888)
+            Utils.matToBitmap(imageMat, bmp)
+
+        }catch (e:CvException) {
+            Log.d("Exception", e.toString())
+        }
+        return bmp
     }
 
-    fun detectTextFromBitmap(bitmap : Bitmap) : String{
-        val recognizer = TextRecognizer.Builder(this@MainActivity).build()
-        val frame = Frame.Builder().setBitmap(bitmap).build()
-        val sparseArray = recognizer.detect(frame)
+
+    fun detectTextFromBitmap(bitmap : Bitmap?) : String{
         val stringBuilder = StringBuilder()
-        for (i in 0 until sparseArray.size()){
-            val tx = sparseArray.get(i)
-            val str = tx.getValue()
-            stringBuilder.append(str)
+        try{
+            val recognizer = TextRecognizer.Builder(baseContext).build()
+            val frame = Frame.Builder().setBitmap(bitmap).build()
+            val sparseArray = recognizer.detect(frame)
+            for (i in 0 until sparseArray.size()){
+                val tx = sparseArray.get(i)
+                val str = tx.getValue()
+                stringBuilder.append(str)
+            }
+            Log.i("ResultInSparseArray", sparseArray.toString())
+
+        }catch (e: Exception){
+            Log.d("ImageOCR", "ImageOCR Not Found")
         }
         return stringBuilder.toString()
     }
@@ -179,15 +226,16 @@ class MainActivity : AppCompatActivity(), CameraBridgeViewBase.CvCameraViewListe
     fun validatedResult(result : String) : Boolean{
         var valid = true
 
+//      Validate For Khmer ID
         if(result.contains("khm", ignoreCase = true)){
 //          Divide Result Into Two Parts
 //          First part contained the ID Number
-//          Second part contained the Dob, Gender, and Name
+//          Second part contained the Dob, Gender, and Expired Date
             val firstPart = result!!.substringBefore("<").substringAfter("KHM")
             val secondPart = result!!.substringAfter("<").substringBefore("KHM")
 
 //          Validate ID Number
-            var id = firstPart.dropLast(1).trim().replace(" ", "")
+            var id = firstPart.dropLast(1).replace(" ", "")
             id = id.toLowerCase().replace("o","0")
             if(id.length<6){
                 valid = false
@@ -206,19 +254,19 @@ class MainActivity : AppCompatActivity(), CameraBridgeViewBase.CvCameraViewListe
 //          Validate Dob
             var dob = ""
             try {
-                dob = secondPart!!.replace("<","").replace(" ", "").trim().take(6)
+                dob = secondPart!!.replace("<","").trim().take(7)
                 val num = parseInt(dob)
-                this.dob = dob
-            } catch (e: NumberFormatException) {
+                this.dob = dob.dropLast(1).toString()
+            } catch (e: Exception) {
                 valid = false
-                Log.e("Error DOB: ", dob)
+                Log.e("Error DOB: ", dob+"\n${e.toString()}")
             }
 
 //          Validate Gender
-            if(secondPart.replace("<","").contains("m", ignoreCase = true)){
+            if(secondPart.contains("m", ignoreCase = true)){
                 this.gender = "Male"
             }
-            else if(secondPart.replace("<","").contains("f", ignoreCase = true)){
+            else if(secondPart.contains("f", ignoreCase = true)){
                 this.gender = "Female"
             }
             else {
@@ -227,11 +275,14 @@ class MainActivity : AppCompatActivity(), CameraBridgeViewBase.CvCameraViewListe
             }
 
 //          Validate Name
-            val removeNumber = Regex("[0-9]")
-            this.name = removeNumber.replace(result!!.substringAfter("<").substringAfter("KHM").replace("<<", " ").replace("<", "").replace("\n", ""), "").trim().toUpperCase()
-            val ptrn = Pattern.compile("(\\w+)\\s+(\\w+)");
-            val matcher = ptrn.matcher(this.name);
-            if(!matcher.find()){
+            val removeNumber = Regex("[0-9]") // Remove Number From Name
+            this.name_person = removeNumber.replace(result!!.substringAfter("<").substringAfter("KHM")
+                .replace("<<", " ")
+                .replace("<", " ")
+                .replace("\n", ""), "")
+                .trim().toUpperCase()
+
+            if(!result!!.substringBefore("KHM").contains(this.name_person)){
                 valid = false
             }
         }
@@ -242,10 +293,9 @@ class MainActivity : AppCompatActivity(), CameraBridgeViewBase.CvCameraViewListe
         return valid
     }
 
-    fun saveFile(context:Context, b:Bitmap, picName:String, resultStr: String) {
+    fun saveFile(context:Context, b:Bitmap, picName:String) {
         var fos : FileOutputStream
-        try
-        {
+        try{
             fos = context.openFileOutput(picName, Context.MODE_PRIVATE)
             b.compress(Bitmap.CompressFormat.PNG, 100, fos)
         }
@@ -259,12 +309,53 @@ class MainActivity : AppCompatActivity(), CameraBridgeViewBase.CvCameraViewListe
         }
     }
 
-    private external fun returnGrayImg(matAddr: Long): String
+    fun startActivityFromMainThread(id_number: String, dob: String, gender: String, name: String, image_name: String, image_assesment_time: Long, ocr_time: Long) {
+        val handler = Handler(Looper.getMainLooper())
+        handler.post(object:Runnable {
+            override fun run() {
+                val intent = Intent(this@MainActivity, ResultActivity::class.java)
+                intent.apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                }
+
+                intent.putExtra("idNumber", id_number)
+                intent.putExtra("dob", dob)
+                intent.putExtra("gender", gender)
+                intent.putExtra("name", name)
+                intent.putExtra("image_name", image_name)
+                intent.putExtra("assesment_time", image_assesment_time.toString())
+                intent.putExtra("ocr_time", ocr_time.toString())
+                intent.putExtra("processing_time", (System.currentTimeMillis() - start).toString())
+                startActivity(intent)
+            }
+        })
+    }
+
+    inline fun <T> measureTimeMillis(loggingFunction: (Long) -> Unit, function: () -> T): T {
+        val startTime = System.currentTimeMillis()
+        val result: T = function.invoke()
+        loggingFunction.invoke(System.currentTimeMillis() - startTime)
+        return result
+    }
+
+    fun saveLogFile(imgOCR : ImageOCR?, ocr_time: Long, resultSTR : String){
+        val output =    "Assessments Time: ${imgOCR!!.assesment_time}ms\n"+
+                        "OCR Time: ${ocr_time}ms\n"+
+                        "Laplacain: ${imgOCR!!.lapla_var}"
+                        "------------------------\n"+
+                        "Output: \n"+
+                        "$resultSTR"
+
+        val logFileName = "Session_Log_${System.currentTimeMillis()}.txt"
+    }
+
+    private external fun returnVarLapla(matAddr: Long): String
 
     companion object {
-        private const val BEST_IMAGE = 200
-        private const val MINIMUM_TEXT_LENGTH = 25
         private const val TAG = "MainActivity"
+        private const val BEST_IMAGE = 160
+        private const val MINIMUM_TEXT_LENGTH = 25
         private const val PERMISSION_REQUEST = 1
     }
 }

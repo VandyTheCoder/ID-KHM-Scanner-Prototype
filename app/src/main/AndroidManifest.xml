@@ -20,7 +20,7 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
         tools:ignore="GoogleAppIndexingWarning">
-        <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
+        <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="landscape">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -28,7 +28,15 @@
             </intent-filter>
         </activity>
 
-        <activity android:name=".ResultActivity" android:screenOrientation="portrait"></activity>
+        <activity android:name=".ResultActivity"
+            android:screenOrientation="portrait"
+            android:label="Output Result">
+        </activity>
+
+        <activity android:name=".VideoActivity"
+            android:screenOrientation="portrait"
+            android:label="Recorded Video">
+        </activity>
 
          <meta-data android:name="com.google.android.gms.vision.DEPENDENCIES" android:value="ocr"/>
     </application>
