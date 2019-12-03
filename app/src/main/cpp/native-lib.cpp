@@ -48,7 +48,7 @@ Java_com_nhean_bestframe_VideoActivity_returnVarLapla(JNIEnv* env, jobject, jlon
     for( int y = 0; y < mat.rows; y++ ) {
         for( int x = 0; x <  mat.cols; x++ ) {
             for( int c = 0; c < mat.channels(); c++ ) {
-                new_image.at<Vec3b>(y,x)[c] = saturate_cast<uchar>( 3.0*mat.at<Vec3b>(y,x)[c] + 100 );
+                new_image.at<Vec3b>(y,x)[c] = saturate_cast<uchar>( 2.0*mat.at<Vec3b>(y,x)[c] + 50 );
             }
         }
     }

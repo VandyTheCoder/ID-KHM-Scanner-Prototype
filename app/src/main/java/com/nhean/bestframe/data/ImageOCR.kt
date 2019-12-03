@@ -1,4 +1,4 @@
-package com.nhean.bestframe
+package com.nhean.bestframe.data
 
 import android.graphics.Bitmap
 

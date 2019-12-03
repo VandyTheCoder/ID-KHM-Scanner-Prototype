@@ -7,7 +7,6 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
-import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -19,12 +18,12 @@ import androidx.core.app.ActivityCompat
 import android.widget.Toast
 import com.google.android.gms.vision.Frame
 import com.google.android.gms.vision.text.TextRecognizer
+import com.nhean.bestframe.data.ImageOCR
 import org.opencv.android.*
 import org.opencv.core.*
 import java.io.*
 import java.lang.Integer.parseInt
 import java.util.*
-import java.util.regex.Pattern
 
 
 class MainActivity : AppCompatActivity(), CameraBridgeViewBase.CvCameraViewListener2{
@@ -185,7 +184,8 @@ class MainActivity : AppCompatActivity(), CameraBridgeViewBase.CvCameraViewListe
         }
 
         if(lapla_var > BEST_IMAGE){
-            imageOCRMain = ImageOCR(matToBitmap(frame.rgba()), lapla_var, time)
+            imageOCRMain =
+                ImageOCR(matToBitmap(frame.rgba()), lapla_var, time)
 
         }
         return frame.rgba()
@@ -254,9 +254,16 @@ class MainActivity : AppCompatActivity(), CameraBridgeViewBase.CvCameraViewListe
 //          Validate Dob
             var dob = ""
             try {
-                dob = secondPart!!.replace("<","").trim().take(7)
+                dob = secondPart!!
+                    .replace("<","")
+                    .replace("«","")
+                    .replace(" ", "")
+                    .replace("o","0")
+                    .replace("O","0")
+                    .replace("K", "")
+                    .trim().take(7)
                 val num = parseInt(dob)
-                this.dob = dob.dropLast(1).toString()
+                this.dob = dob.dropLast(1)
             } catch (e: Exception) {
                 valid = false
                 Log.e("Error DOB: ", dob+"\n${e.toString()}")
@@ -279,10 +286,12 @@ class MainActivity : AppCompatActivity(), CameraBridgeViewBase.CvCameraViewListe
             this.name_person = removeNumber.replace(result!!.substringAfter("<").substringAfter("KHM")
                 .replace("<<", " ")
                 .replace("<", " ")
+                .replace("«"," ")
+                .replace(" K "," ")
                 .replace("\n", ""), "")
                 .trim().toUpperCase()
 
-            if(!result!!.substringBefore("KHM").contains(this.name_person)){
+            if(!result!!.substringBefore("KHM").toUpperCase().contains(this.name_person)){
                 valid = false
             }
         }

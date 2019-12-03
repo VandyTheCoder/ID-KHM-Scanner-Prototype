@@ -38,7 +38,13 @@
             android:label="Recorded Video">
         </activity>
 
-         <meta-data android:name="com.google.android.gms.vision.DEPENDENCIES" android:value="ocr"/>
+        <activity android:name=".BenchMarkActivity"
+            android:screenOrientation="portrait"
+            android:label="BenchMark">
+        </activity>
+
+
+        <meta-data android:name="com.google.android.gms.vision.DEPENDENCIES" android:value="ocr"/>
     </application>
 
     <supports-screens android:resizeable="true"
