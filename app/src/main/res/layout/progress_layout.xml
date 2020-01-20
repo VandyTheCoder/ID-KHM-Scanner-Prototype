@@ -19,7 +19,6 @@
         android:textStyle="bold"
         android:gravity="center"
         android:textColor="@color/colorPrimary"
-        android:layout_marginTop="8dp"
-        android:text="Extracting ..."/>
+        android:layout_marginTop="8dp"/>
 
 </LinearLayout>

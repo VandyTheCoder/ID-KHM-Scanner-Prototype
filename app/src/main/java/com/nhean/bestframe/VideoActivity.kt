@@ -7,6 +7,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.provider.DocumentsContract
@@ -14,6 +15,7 @@ import android.provider.MediaStore
 import android.util.Log
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.net.toFile
 import com.google.android.gms.vision.Frame
 import com.google.android.gms.vision.text.TextRecognizer
 import com.nhean.bestframe.data.IDPerson
@@ -23,20 +25,24 @@ import org.opencv.core.Core
 import org.opencv.core.CvException
 import org.opencv.core.Mat
 import org.opencv.videoio.VideoCapture
-import java.io.FileNotFoundException
-import java.io.FileOutputStream
-import java.io.IOException
+import java.io.*
 import kotlin.collections.ArrayList
 
 class VideoActivity : AppCompatActivity() {
 
+//  Processing Variable
     var video_path = ArrayList<String>()
     var people = ArrayList<String>()
-    var flag = true
     var best_image : Bitmap? = null
     var extract_thread : Thread? = null
     var start : Long = 0
 
+//  Log File Variable
+    val time_stamp = System.currentTimeMillis()
+    val path = Environment.getExternalStorageDirectory().toString()+"/IDScanner"
+    val sd_folder = File(path, "session_${time_stamp}")
+
+//  IDPerson Object
     var person : IDPerson? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,55 +59,70 @@ class VideoActivity : AppCompatActivity() {
             startActivityForResult(intent, VIDEO_SELECTED_CODE)
         }
 
+        Log.d("PathToExternal", Environment.getExternalStorageDirectory().toString())
+
         // Start Video Frame Extracting Thread
         extract_thread = Thread(object:Runnable {
             override fun run() {
                 for(i in 0 until video_path!!.size){
                     val matOrig = Mat()
-                    val capture = VideoCapture(video_path!!.get(i))
+                    var capture = VideoCapture(video_path!!.get(i))
                     val start_processing : Long = System.currentTimeMillis()
 
                     if (capture.isOpened()){
-                        var capture_flag = true
-                        while (capture_flag){
-                            capture.read(matOrig)
-                            if (!matOrig.empty()) {
-                                var assesment_time : Long = 0
+                        extract_text_from_frame(capture, matOrig, start_processing, i)
+                    }
+                    else{
+                        people.add("Error Video Format-${video_path.get(i)}")
+                    }
+                    capture.release()
+                }
+                startActivityFromMainThread(people)
+            }
 
-//                                Core.rotate(matOrig, matOrig, Core.ROTATE_90_CLOCKWISE);
-//                                Core.rotate(matOrig, matOrig, Core.ROTATE_90_CLOCKWISE);
-                                val varLapla = measureTimeMillis({duration -> assesment_time = duration}){
-                                    returnVarLapla(matOrig.nativeObjAddr).toDouble()
-                                }
-                                Log.i("Laplacian-Var", varLapla.toString()+"\n Duration: $assesment_time ms")
+            fun extract_text_from_frame(capture : VideoCapture, matOrig : Mat, start_processing: Long, i : Int){
+                var capture_flag = true
+                while (capture_flag){
+                    capture.read(matOrig)
+                    if (!matOrig.empty()) {
+                        var assesment_time : Long = 0
 
-                                if(varLapla > BEST_FRAME){
-                                    var ocr_time : Long = 0
-                                    best_image = matToBitmap(matOrig) // Convert Mat to Bitmap ImageOCR Android
-                                    val resultStr = measureTimeMillis({duration -> ocr_time = duration}){
-                                        detectTextFromBitmap(best_image) // Mobile Vision OCR
-                                    }
-                                    Log.d("ResultSTR", resultStr)
+//                                For Required Rotate Video
+//                        Core.rotate(matOrig, matOrig, Core.ROTATE_90_CLOCKWISE)
+//                        Core.rotate(matOrig, matOrig, Core.ROTATE_90_CLOCKWISE)
+//                        Core.rotate(matOrig, matOrig, Core.ROTATE_90_CLOCKWISE)
 
-                                    if(!resultStr.isEmpty() && resultStr.length > MINIMUM_TEXT_LENGTH && validatedResult(resultStr)){
-                                        val processing_time = System.currentTimeMillis() - start_processing
+                        val varLapla = measureTimeMillis({duration -> assesment_time = duration}){
+                            returnVarLapla(matOrig.nativeObjAddr).toDouble()
+                        }
+                        Log.i("Laplacian-Var", varLapla.toString()+"\n Duration: $assesment_time ms")
 
-                                        Log.i("ValidatedSTR", person.toString())
-
-                                        people.add(person.toString()+"\nProcessing Time: ${processing_time/1000}s")
-                                        capture_flag = false
-                                    }
-                                }
+                        if(varLapla > BEST_FRAME){
+                            var ocr_time : Long = 0
+                            best_image = matToBitmap(matOrig) // Convert Mat to Bitmap ImageOCR Android
+                            val resultStr = measureTimeMillis({duration -> ocr_time = duration}){
+                                detectTextFromBitmap(best_image) // Mobile Vision OCR
                             }
-                            else{
+                            Log.d("ResultSTR", resultStr+"\nDuration: ${ocr_time}ms")
+
+                            if(!resultStr.isEmpty() && resultStr.length > MINIMUM_TEXT_LENGTH && validatedResult(resultStr)){
                                 val processing_time = System.currentTimeMillis() - start_processing
-                                people.add("Couldn't Get Information on ID Card!\nProcessing Time: ${processing_time/1000}s")
+                                people.add(person.toString()+"\nProcessing Time: ${processing_time/1000}s\n\n")
                                 capture_flag = false
+
+                                saveLogFile(person, processing_time, ocr_time, assesment_time, video_path.get(i))
+                                Log.i("ValidatedSTR", person.toString())
                             }
                         }
                     }
+                    else{
+                        val processing_time = System.currentTimeMillis() - start_processing
+                        people.add("Couldn't Get Information on ID Card!\nProcessing Time: ${processing_time/1000}s\n\n")
+                        capture_flag = false
+
+                        saveLogFile(person, processing_time, 0, 0, video_path.get(i))
+                    }
                 }
-                startActivityFromMainThread(people)
             }
         })
     }
@@ -113,7 +134,6 @@ class VideoActivity : AppCompatActivity() {
             {
                 for (i in 0 until clipData.getItemCount()){
                     val videoItemPath = getPath(clipData.getItemAt(i).uri)
-                    Log.i("Video-File", videoItemPath)
                     video_path.add(videoItemPath.toString())
                 }
             }
@@ -212,6 +232,8 @@ class VideoActivity : AppCompatActivity() {
                     .replace("o","0")
                     .replace("O","0")
                     .replace("K", "")
+                    .replace("k", "")
+                    .replace("\n", "")
                     .trim().take(7)
                 val num = Integer.parseInt(dob)
                 dob = dob.dropLast(1)
@@ -239,12 +261,17 @@ class VideoActivity : AppCompatActivity() {
                 .replace("<<", " ")
                 .replace("<", " ")
                 .replace("«"," ")
-                .replace(" K "," ")
+                .replace(" K"," ")
+                .replace(" k"," ")
                 .replace("\n", ""), "")
                 .trim().toUpperCase()
 
-            if(!result!!.substringBefore("KHM").toUpperCase().contains(name_person)){
+            if(!result!!.substringBefore("KHM").toUpperCase().replace(" ", "").contains(name_person.replace(" ", ""))){
                 Log.e("Error Name: ", name_person)
+                valid = false
+            }
+            if(name_person.length < 5){
+                Log.e("Error Name: ", "Too Less Character to be a person name - ${name_person}")
                 valid = false
             }
 
@@ -257,45 +284,27 @@ class VideoActivity : AppCompatActivity() {
         return valid
     }
 
-    fun saveFile(context: Context, b:Bitmap, picName:String) {
-        var fos : FileOutputStream
-        try
-        {
-            fos = context.openFileOutput(picName, Context.MODE_PRIVATE)
-            b.compress(Bitmap.CompressFormat.PNG, 100, fos)
-        }
-        catch (e: FileNotFoundException) {
-            Log.d("IO", "file not found")
-            e.printStackTrace()
-        }
-        catch (e: IOException) {
-            Log.d("IO", "io exception")
-            e.printStackTrace()
-        }
-    }
+    fun saveLogFile(person : IDPerson?, processing_time: Long, ocr_time: Long, assesment_time: Long, file_path: String){
+        val sd_main = File(path)
+        var success = true
 
-    fun startActivityFromMainThread(id_number: String, dob: String, gender: String, name: String, image_name: String, assesment_time : Long, ocr_time : Long) {
-        val handler = Handler(Looper.getMainLooper())
-        handler.post(object:Runnable {
-            override fun run() {
-                val intent = Intent(this@VideoActivity, ResultActivity::class.java)
-                intent.apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                }
-
-                intent.putExtra("idNumber", id_number)
-                intent.putExtra("dob", dob)
-                intent.putExtra("gender", gender)
-                intent.putExtra("name", name)
-                intent.putExtra("image_name", image_name)
-                intent.putExtra("assesment_time", assesment_time.toString())
-                intent.putExtra("ocr_time", ocr_time.toString())
-                intent.putExtra("processing_time", (System.currentTimeMillis() - start).toString())
-
-                startActivity(intent)
+        if (!sd_main.exists()) {
+            success = sd_main.mkdir()
+        }
+        if (success) {
+            if(!sd_folder.exists()){
+                success = sd_folder.mkdir()
             }
-        })
+            if (success){
+                val dest = File(path,"/session_${time_stamp}/${file_path.split("/").last()}.txt")
+                try {
+                    val text = "${person.toString()}\nProcessing Time: ${processing_time/1000}s\nVideo File Path: ${file_path}"
+                    PrintWriter(dest).use { out -> out.println(text) }
+                } catch (e: Exception) {Log.d("SaveLogFile", "Error Saving File: ${e}")}
+            }
+            else{Log.d("SaveLogFile", "Error Creating Folder Session")}
+        }
+        else{Log.d("SaveLogFile", "Error Creating Folder IDScanner")}
     }
 
     fun startActivityFromMainThread(people : ArrayList<String>){
@@ -325,7 +334,7 @@ class VideoActivity : AppCompatActivity() {
 
     companion object{
         private const val VIDEO_SELECTED_CODE = 10
-        private const val BEST_FRAME = 150
+        private const val BEST_FRAME = 50
         private const val MINIMUM_TEXT_LENGTH = 30
 
         init {

@@ -16,7 +16,12 @@ class BenchMarkActivity : AppCompatActivity() {
             val people = bundle.getStringArrayList("people")
             val processing_time = bundle.getString("processing_time")
 
-            result_txt.text = people.toString()+"\n\nTotal Time: ${processing_time}s"
+            result_txt.text = "${people.toString()}\n\nTotal Time: ${processing_time}s"
+                .replace("[", "")
+                .replace("]","")
+                .replace("(","\n+")
+                .replace(")","")
+                .replace(", ","\n-")
         }
     }
 
