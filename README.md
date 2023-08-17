@@ -1,4 +1,4 @@
-# ID-KHM-Scanner-Prototype
+# KHM-ID-OCR-Android-App
 This is the prototype that can extract text from your Khmer ID card. To put it simply as developers, it is the OCR-Android-Application that
 read the text on Khmer ID Card.
 
